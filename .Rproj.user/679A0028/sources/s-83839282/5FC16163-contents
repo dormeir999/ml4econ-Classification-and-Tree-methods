@@ -1,0 +1,65 @@
+---
+title: "lab_3_Classification_and_Tree_methods"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part 1: Logistic regression and LDA and QDA
+
+1. We will use the Weekly dataset from the ISLR package. View it, and check for NA's and irrelevant variables.
+```{r , echo=TRUE}
+library(ISLR)
+dat<-Weekly
+attach(dat)
+str(dat)
+head(dat)
+dat[!complete.cases(dat),]
+```
+There are no missing values, and there is only 1 factor variable: Direction.
+For binomial and quasibinomial families the response, in our case Direction, can also be specified as a factor.
+The Year variable is  descrete.
+
+
+2. Preform logistic regression using the full data set with direction as the response variable and the five lag variables and volume as predictors. Are any predictors statistically significant? If so, which ones?
+```{r , echo=TRUE}
+glm_model<-glm(formula = Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5  + Volume,data = dat,family = binomial)
+summary(glm_model)
+```
+Only Lag2's predictor is siginificant  at the level of 5% and the intercept is significant at the level of 1%.
+
+3. Fit logistic regression using a training set from 1990 till 2008, with lag2 as the only predictor. Compute the confusion matrix on the test data (2009 and 2010).
+
+First, create train and test sets, and the new glm model:
+```{r , echo=TRUE}
+train_dat <- subset(dat, Year<2009)
+summary(train_dat$Year)
+test_dat <- subset(dat, Year>=2009)
+summary(test_dat$Year)
+glm2<-glm(formula = Direction ~ Lag2,data = train_dat,family = binomial)
+summary(glm2)
+```
+Second, predict Direction_hat:
+```{r , echo=TRUE}
+Direction_hat <- predict(glm2,type="response",newdata = test_dat)
+```
+Lastly, create the confusion matrix the predictions and the test data:
+```{r , echo=TRUE}
+table(Direction_hat,test_dat$Direction)
+```
+
+4. Repeat 3 using, LDA.
+
+library(MASS)
+lda<-lda(Direction ~ Lag2,data = dat)
+lda_Direction_hat <- predict(lda,type="response",newdata = test_dat)
+
+
+5. Repeat 3 using QDA.
+6. Analyze the results Compare between the methods.
+
+
+## Part 2: Tree Based methods
+

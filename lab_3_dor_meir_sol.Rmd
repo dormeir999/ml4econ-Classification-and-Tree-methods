@@ -1,0 +1,298 @@
+---
+title: "lab_3_Classification_and_Tree_methods"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part 1: Logistic regression and LDA and QDA
+
+1. We will use the Weekly dataset from the ISLR package (and use MASS and dplyr as well). View it, and check for NA's and irrelevant variables.
+```{r , echo=TRUE}
+library(ISLR)
+library(MASS)
+library(dplyr)
+dat <- Weekly
+attach(dat)
+str(dat)
+head(dat)
+dat[!complete.cases(dat),]
+```
+There are no missing values, and there is only 1 factor variable: Direction, all other variables are numberic.
+For binomial and quasibinomial families the response, in our case Direction, can also be specified as a factor. Coding Direction to 0,1 level factor:
+```{r , echo=TRUE}
+dat$Direction <- ifelse(dat$Direction=="Up",1,0)
+```
+
+2. Preform logistic regression using the full data set with direction as the response variable and the five lag variables and volume as predictors. Are any predictors statistically significant? If so, which ones?
+```{r , echo=TRUE}
+glm_model<-glm(formula = Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5  + Volume,data = dat,family = "binomial")
+summary(glm_model)
+```
+
+Only Lag2's predictor is siginificant  at the level of 5% and the intercept is significant at the level of 1%.
+
+3. Fit logistic regression using a training set from 1990 till 2008, with lag2 as the only predictor. Compute the confusion matrix on the test data (2009 and 2010).
+
+First, create train and test sets, and the new glm model:
+```{r , echo=TRUE}
+train_dat <- subset(dat, Year<2009)
+summary(train_dat$Year)
+test_dat <- subset(dat, Year>=2009)
+summary(test_dat$Year)
+glm2<-glm(formula = Direction ~ Lag2,data = train_dat,family = "binomial")
+summary(glm2)
+```
+Second, predict Direction_hat:
+```{r , echo=TRUE}
+Direction_hat <- predict(glm2,type="response",newdata = test_dat)
+```
+
+we need to choose a threshold in order to compute the confusion matrix with respect to the values in the test set, as in the classification pdf p 15.Here is a plot of the prediction's accuracy, sensitivity and specificity for different thresholds in the train set:
+```{r, echo = FALSE }
+weekly_1990_2008 <- filter(dat, Year>1990 & Year<=2008)
+```
+
+```{r threshold_graph, echo = FALSE }
+threshold_grid <- seq(0,1,0.001)
+weekly_1990_2008_hat <- predict(glm2, newdata = train_dat, type = "response")
+
+conf_values <- function(threshold, values, predictions) {
+  
+  bin_predictions <- ifelse(predictions>=threshold, 1, 0)
+    
+  TP <- sum(ifelse((values==1 & bin_predictions==1),1,0))
+  FP <- sum(ifelse((values==0 & bin_predictions==1),1,0))
+  FN <- sum(ifelse((values==1 & bin_predictions==0),1,0))
+  TN <- sum(ifelse((values==0 & bin_predictions==0),1,0))
+  
+  Specificity <- TN / (TN + FP) 
+  Sensitivity <- TP / (TP + FN)
+  Accuracy <- (TP + TN) / (length(values))
+  
+  result <- c(threshold, Specificity, Sensitivity, Accuracy)
+  names(result) <- c("Threshold","Specificity", "Sensitivity", "Accuracy")
+  
+  return(result)
+  
+}
+
+confusion_design <- vapply(threshold_grid, conf_values, values = train_dat$Direction, predictions = weekly_1990_2008_hat, numeric(4))
+
+matplot(t(confusion_design)[,1], t(confusion_design)[,2:4], 
+        type = "l", lty = "solid", lwd = 2,
+        main = "Logit Model Parameters", xlab = "Threshold", ylab = "",
+        , col = 1:3
+        )
+legend("bottomleft",legend = c("Specificity", "Sensitivity", "Accuracy"), col = 1:3, lty = "solid", lwd = 2)
+
+```
+we can see that ~0.5 is a threshold that creates a very low specificity (high chances of type 1 error), and with high power (low chances of type 2 error). If we assume a loss-averter decision-maker, who cares more about losing than about gaining money, the maximal errors with respect to type 2 error will be set to 10%. Given this decision rule I will minimize the type 1 error (maximize the sensitivity).
+
+```{r echo = TRUE}
+restricted_conf <- which(confusion_design[3,]>0.1)
+max_index <- which.max(confusion_design[2,restricted_conf])
+chosen_threshold <- confusion_design[1, max_index]
+```
+The maximizer is `r chosen_threshold`
+
+```{r}
+confusion_lgm2 <- table(test_dat$Direction, ifelse(Direction_hat>=chosen_threshold, 1, 0))
+confusion_lgm2
+```
+
+4. Repeat 3 using, LDA.
+
+```{r}
+lda_train <- lda(formula = Direction ~ Lag2, data = train_dat)
+test_hat_lda <- predict(lda_train, newdata = test_dat, type = "response")
+confusion_lda <- table(test_dat$Direction, test_hat_lda$class)
+confusion_lda
+```
+
+5. Repeat 3 using QDA.
+
+
+```{r}
+qda_train <- qda(formula = Direction ~ Lag2, data = train_dat)
+train_hat_qda <- predict(qda_train, newdata = test_dat, type = "response")
+confusion_qda <- table(test_dat$Direction, train_hat_qda$class)
+confusion_qda
+```
+
+
+6. Analyze the results Compare between the methods.
+
+
+```{r}
+conf_matrix_prop <- function(conf_matrix) {
+  
+  TP <- conf_matrix[2,2]
+  FP <- conf_matrix[1,2]
+  FN <- conf_matrix[2,1]
+  TN <- conf_matrix[1,1]
+  
+  False_Positive_Rate <- FP / (TN + FP) # 1 - Specificity (type 1 error)
+  True_Positive_Rate <- TP / (TP + FN) # Sensitivity (or Power)
+  Positive_Predictive_Value <- TP / (FP + TP) # Precision
+  Negative_Predictive_Value <- TN / (TN + FN)
+  Accuracy <- (TP + TN) / (TP + TN + FP + FN)
+  Error_Rate <- (FP + FN) / (TP + TN + FP + FN)
+  
+  result <- c(False_Positive_Rate, True_Positive_Rate, Positive_Predictive_Value, Negative_Predictive_Value, Accuracy, Error_Rate)
+  names(result) <- c("False Positive Rate", "True Positive Rate", "Positive Predictive Value", "Negative Predictive Value", "Accuracy", "Error Rate")
+  
+  return(result)
+}
+
+list(Logistic = confusion_lda,"Logistic Properties" = conf_matrix_prop(confusion_lgm2), LDA = confusion_lda, "LDA Properties" = conf_matrix_prop(confusion_lda),QDA = confusion_qda, "QDA Properties" = conf_matrix_prop(confusion_qda))
+```
+Let us compare the models:
+
+In terms pf false positives rate the *Logit* model with the cut-off chosen by-hand is the best, as this was the main consideration. On the other hand, the *Logit* doesn't capture the true positives rate, nor it has a reletivly good accuracy level. This two latter considerations appears to be optimal in the *LDA* model (which is actually equivalent in our case to the *Logit* model, only here it is with a threshold of 0.5). The *QDA* model is too optimistic, as it predicts only positive values. it's accuracy is higher than of the *Logit*, but it only reflects the proportion of increases in the stock market.
+
+## Part 2: Tree Based methods
+
+1. We will use the Carseats dataset from the ISLR package to predict the variable
+Sales. I'll load the tree, randomForest and gbm packages for the Trees, Random-Forests and Bagging and Boosting models (respectively)
+
+```{r  , warning=FALSE}
+library(tree) 
+library(randomForest) 
+library(gbm) 
+
+```
+
+I'll now Import the *Carseats* data and as usual:
+inspect it, examine the structure and check for missing values:
+
+```{r}
+carseats <- Carseats
+head(carseats)
+str(carseats)
+which(is.na(carseats))
+``` 
+
+The dataset is of sales of child car seats at 400 different stores. The data contains 11 varaibles (8 numeric, 2 two-level factors, 1 three-level factor) and 400 observations, and no missing values were found.
+
+2. Split the data into training and test sets:
+
+
+```{r}
+set.seed(1234)
+index <- sample(1:nrow(carseats), size=.25*nrow(carseats))
+test_carseats <-carseats[index,]
+train_carseats <- carseats[-index,]
+```
+
+3. Fit a regression tree to the training set. Plot the tree and discuss the results. What
+are the test MSE results?
+
+First, I'll grow the tree:
+
+```{r}
+tree <- tree( Sales ~ . , train_carseats )
+summary(tree)
+```
+The median residual is quite low and the mean residual is zero, which means the model is quite good at fitting the results (but we might suspect overfitting, so no pruning was done).
+
+Now, I'll Plot of the tree:
+```{r echo=FALSE}
+plot(tree)
+text(tree)
+```
+
+Calculating the MSE:
+
+```{r}
+Sales_hat_tree <- predict(tree, test_carseats)
+
+MSE_calc <- function(real, prediction) {
+  result <- mean((prediction-real)^2)
+  return(result)
+}
+
+MSE_calc(test_carseats$Sales, Sales_hat_tree)
+```
+
+With grown a large tree of 16 terminal nodes without pruning it, this MSE might be a result of overfitting due to high variance (but it seems quite low, we'll check this out in the next . 
+
+4. Use cross validation in order to determine the optimal level of tree complexity.
+Does pruning the tree improve the test MSE?
+
+I use 5-fold CV:
+
+```{r}
+cv_tree <- cv.tree(tree, K = 5)
+final_terminal_nodes = cv_tree$size[which.min(cv_tree$dev)]
+```
+
+And now plot of the results:
+
+```{r echo=FALSE}
+plot(cv_tree$size ,cv_tree$dev)
+abline(v = final_terminal_nodes, col = "red", lty = 2)
+abline(h = min(cv_tree$dev), lty = 2)
+```
+
+The minimizer is `r final_terminal_nodes` - which is the entire tree, as we saw before. Even though, it does not seems wise to use the whole tree, so I will pay a little in terms of deviation and choose a smaller tree. 
+
+The MSE of the new pruned tree:
+
+```{r}
+tree_pruned <- prune.tree(tree, best = final_terminal_nodes-2)
+Sales_hat_tree_pruned <- predict(tree_pruned, test_carseats)
+MSE_calc(test_carseats$Sales,Sales_hat_tree_pruned)
+```
+
+And as we can see, we now have a bit higher MSE since we used a smaller number of terminal nodes than the minizer suggests...
+
+5. Apply the Bagging (random forest with the maximum number of variables), random forests and boosting approaches. Use the importance()
+function to determine (where possible) which variables are most important.
+
+```{r}
+bagging <- randomForest(formula =  Sales ~ . , data = train_carseats, mtry = 10, importance = TRUE)
+boosting <- gbm(formula =  Sales ~ . , data = train_carseats, distribution = "gaussian")
+random_forests <- randomForest(formula =  Sales ~ . , data = train_carseats, mtry = round(sqrt(10)), importance = TRUE)
+```
+
+The estimated importance matrix in the *Bagging* and *Random-Forests* algorithms:
+
+```{r}
+importance(bagging)
+varImpPlot(bagging)
+importance(random_forests)
+varImpPlot(random_forests)
+summary.gbm(boosting)
+plot(summary.gbm(boosting))
+```
+SheleveLoc and Price seems to be the most important features, both in the bagging, random_forests and boosting, as permuting them results in the highest %IncMSE (change in MSE) . 
+
+6. Discuss and compare the results.
+
+The MSEs:
+
+```{r}
+Sales_hat_bagging <- predict(bagging, test_carseats)
+Sales_hat_boosting <- predict(boosting, test_carseats, n.trees = boosting$n.trees)
+Sales_hat_random_forests <- predict(random_forests, test_carseats)
+
+MSE_calc(test_carseats$Sales,Sales_hat_bagging)
+MSE_calc(test_carseats$Sales,Sales_hat_boosting) 
+MSE_calc(test_carseats$Sales,Sales_hat_random_forests) 
+
+```
+% Var explained:
+
+```{r}
+random_forests
+bagging
+```
+
+And as you can see, the boosting's MSE is lowest (each new tree of the model helps to correct errors made by previously trained tree), but above we can see that more variation is explained in the bagging model (since it's trees are grown deep and not pruned). The advantage of the random forest model is that each tree is trained independently, using a random sample of the data, which makes the model more robust and less likley to overfit the training data.
+
+
+THE END.
+
